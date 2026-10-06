@@ -1,8 +1,8 @@
 from functools import lru_cache
-from typing import Self
+from typing import Any, Self
 
 from perseus_common.config import ServiceSettings
-from pydantic import SecretStr, model_validator
+from pydantic import SecretStr, field_validator, model_validator
 
 
 class Settings(ServiceSettings):
@@ -21,6 +21,12 @@ class Settings(ServiceSettings):
     mail_from: str = "Perseus Finance <no-reply@perseus.local>"
     # Explicit EHLO name: avoids a slow reverse-DNS lookup of the container hostname.
     smtp_helo_hostname: str = "perseus.local"
+
+    @field_validator("smtp_username", "smtp_password", mode="before")
+    @classmethod
+    def _blank_means_unset(cls, value: Any) -> Any:
+        # Compose passes unset optional credentials as "" - that must not trigger SMTP AUTH.
+        return value or None
 
     @model_validator(mode="after")
     def _require_encrypted_smtp(self) -> Self:

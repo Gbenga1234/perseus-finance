@@ -1,0 +1,99 @@
+# Rendered at container start by the nginx image (envsubst, filtered to ${DOMAIN} only).
+# TLS certificates are issued and renewed by certbot on the host; see README "Production TLS".
+
+# --- HTTP: ACME challenges for certbot, everything else redirected to HTTPS ---------------
+server {
+    listen 80;
+    server_name ${DOMAIN};
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        default_type text/plain;
+        limit_req zone=api burst=10 nodelay;
+    }
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# Requests for any other hostname are dropped (no TLS handshake, no response).
+server {
+    listen 80 default_server;
+    return 444;
+}
+server {
+    listen 443 ssl default_server;
+    ssl_reject_handshake on;
+}
+
+# --- HTTPS API ------------------------------------------------------------------------------
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${DOMAIN};
+
+    ssl_certificate     /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
+    ssl_prefer_server_ciphers off;
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:TLS:10m;
+    ssl_session_tickets off;
+
+    proxy_hide_header Strict-Transport-Security;
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
+
+    limit_conn perip 20;
+
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_set_header Host $host;
+    # Overwrite (never append) client-supplied forwarding headers.
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Request-ID $request_id;
+    proxy_connect_timeout 2s;
+    proxy_send_timeout 15s;
+    proxy_read_timeout 15s;
+
+    location = /.well-known/jwks.json {
+        limit_req zone=api burst=10 nodelay;
+        proxy_pass http://auth_upstream;
+    }
+    location ~ ^/v1/auth/(login|register|refresh|password)$ {
+        limit_req zone=credentials burst=5 nodelay;
+        proxy_pass http://auth_upstream;
+    }
+    location /v1/auth/ {
+        limit_req zone=api burst=20 nodelay;
+        proxy_pass http://auth_upstream;
+    }
+    location /v1/accounts {
+        limit_req zone=api burst=20 nodelay;
+        proxy_pass http://accounts_upstream;
+    }
+    location ~ ^/v1/ledger/(transfers|deposits)$ {
+        limit_req zone=money burst=5 nodelay;
+        proxy_pass http://ledger_upstream;
+    }
+    location /v1/ledger/ {
+        limit_req zone=api burst=20 nodelay;
+        proxy_pass http://ledger_upstream;
+    }
+    location /v1/fraud/ {
+        limit_req zone=api burst=20 nodelay;
+        proxy_pass http://fraud_upstream;
+    }
+    location /v1/notifications {
+        limit_req zone=api burst=20 nodelay;
+        proxy_pass http://notifications_upstream;
+    }
+    location /v1/audit/ {
+        limit_req zone=api burst=20 nodelay;
+        proxy_pass http://audit_upstream;
+    }
+    location / {
+        return 404 '{"type":"about:blank","title":"Not Found","status":404,"code":"not_found"}';
+    }
+}

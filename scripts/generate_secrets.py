@@ -1,29 +1,25 @@
-"""Generate every local secret into the git-ignored ``.env`` file.
+"""Generate the git-ignored ``.env`` file: all secrets plus local-development settings.
 
 Usage:  uv run python scripts/generate_secrets.py [--force]
 
 Docker Compose reads ``.env`` automatically and injects the values as environment
-variables. The file is written with mode 0600. The public dev CA certificate is also
-written to ``certs/perseus-dev-ca.crt`` so clients (curl, the smoke test) can verify TLS.
-In production, inject these values from a secret manager (Vault, AWS Secrets Manager, ...).
+variables. The file is written with mode 0600. For production, change the settings in the
+"Deployment settings" block (domain, SMTP relay, ...) as documented in ``.env.example``.
+TLS certificates are not secrets managed here: certbot issues them (see README).
 """
 
 from __future__ import annotations
 
 import argparse
-import datetime as dt
 import hashlib
-import ipaddress
 import json
 import secrets
 import sys
 from pathlib import Path
 
-from cryptography import x509
 from cryptography.fernet import Fernet
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import ec, rsa
-from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 
 SERVICES = ("auth", "accounts", "ledger", "fraud", "notifications", "audit")
 # Which internal APIs each calling service may use (OAuth2 client-credentials scopes).
@@ -31,67 +27,14 @@ SERVICE_CLIENT_SCOPES = {
     "ledger-service": ["accounts:read", "fraud:assess"],
     "accounts-service": ["ledger:balance:read"],
 }
-TLS_HOSTNAMES = ("localhost", "api.perseus.local", "mailpit")
 
 
-def _pem_key(key: rsa.RSAPrivateKey | ec.EllipticCurvePrivateKey) -> bytes:
+def _pem_key(key: rsa.RSAPrivateKey) -> bytes:
     return key.private_bytes(
         serialization.Encoding.PEM,
         serialization.PrivateFormat.PKCS8,
         serialization.NoEncryption(),
     )
-
-
-def _tls_material() -> dict[str, bytes]:
-    now = dt.datetime.now(dt.UTC)
-    ca_key = ec.generate_private_key(ec.SECP384R1())
-    ca_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Perseus Local Dev CA")])
-    ca_cert = (
-        x509.CertificateBuilder()
-        .subject_name(ca_name)
-        .issuer_name(ca_name)
-        .public_key(ca_key.public_key())
-        .serial_number(x509.random_serial_number())
-        .not_valid_before(now - dt.timedelta(minutes=5))
-        .not_valid_after(now + dt.timedelta(days=365))
-        .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
-        .add_extension(
-            x509.KeyUsage(
-                digital_signature=False,
-                content_commitment=False,
-                key_encipherment=False,
-                data_encipherment=False,
-                key_agreement=False,
-                key_cert_sign=True,
-                crl_sign=True,
-                encipher_only=False,
-                decipher_only=False,
-            ),
-            critical=True,
-        )
-        .sign(ca_key, hashes.SHA384())
-    )
-    server_key = ec.generate_private_key(ec.SECP256R1())
-    sans: list[x509.GeneralName] = [x509.DNSName(h) for h in TLS_HOSTNAMES]
-    sans.append(x509.IPAddress(ipaddress.ip_address("127.0.0.1")))
-    server_cert = (
-        x509.CertificateBuilder()
-        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "localhost")]))
-        .issuer_name(ca_name)
-        .public_key(server_key.public_key())
-        .serial_number(x509.random_serial_number())
-        .not_valid_before(now - dt.timedelta(minutes=5))
-        .not_valid_after(now + dt.timedelta(days=90))
-        .add_extension(x509.SubjectAlternativeName(sans), critical=False)
-        .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
-        .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False)
-        .sign(ca_key, hashes.SHA256())
-    )
-    return {
-        "tls_ca_cert": ca_cert.public_bytes(serialization.Encoding.PEM),
-        "tls_cert": server_cert.public_bytes(serialization.Encoding.PEM),
-        "tls_key": _pem_key(server_key),
-    }
 
 
 def build_secrets() -> dict[str, str]:
@@ -117,15 +60,36 @@ def build_secrets() -> dict[str, str]:
             "scopes": scopes,
         }
     values["SERVICE_CLIENTS"] = json.dumps(registry, separators=(",", ":"))
-    values.update({k.upper(): v.decode() for k, v in _tls_material().items()})
     return values
+
+
+# Non-secret settings, defaulting to local development. See .env.example for production.
+LOCAL_SETTINGS = {
+    "ENVIRONMENT": "development",
+    "DOMAIN": "localhost",
+    "GATEWAY_BIND": "127.0.0.1",
+    "HTTP_PORT": "8080",
+    "HTTPS_PORT": "8443",
+    "LETSENCRYPT_DIR": "./letsencrypt",
+    "CERTBOT_WEBROOT": "./certbot-www",
+    "SMTP_HOST": "mailpit",
+    "SMTP_PORT": "1025",
+    "SMTP_STARTTLS": "false",
+    "SMTP_USERNAME": "",
+    "SMTP_PASSWORD": "",
+    "MAIL_FROM": "Perseus Finance <no-reply@perseus.local>",
+}
 
 
 def render_env(values: dict[str, str]) -> str:
     lines = [
         "# Generated by scripts/generate_secrets.py - DO NOT COMMIT (listed in .gitignore).",
-        "# Rotate everything with: uv run python scripts/generate_secrets.py --force",
+        "# Rotate every secret with: uv run python scripts/generate_secrets.py --force",
         "",
+        "# --- Deployment settings (local development defaults; see .env.example) ---",
+        *(f"{name}='{value}'" for name, value in LOCAL_SETTINGS.items()),
+        "",
+        "# --- Secrets ---",
     ]
     for name, value in values.items():
         if "\n" in value:  # PEM: one line, escaped newlines, double quotes
@@ -150,11 +114,7 @@ def main() -> int:
     env_file.touch(mode=0o600, exist_ok=True)
     env_file.chmod(0o600)
     env_file.write_text(render_env(values))
-
-    certs = root / "certs"
-    certs.mkdir(exist_ok=True)
-    (certs / "perseus-dev-ca.crt").write_text(values["TLS_CA_CERT"])
-    print(f"Wrote {env_file} (mode 600) and {certs / 'perseus-dev-ca.crt'}")
+    print(f"Wrote {env_file} (mode 600)")
     return 0
 
 
