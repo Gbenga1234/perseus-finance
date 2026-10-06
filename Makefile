@@ -39,8 +39,17 @@ check: lint typecheck test security ## Everything CI runs (except image scans)
 secrets: ## Generate .env with all secrets (git-ignored; refuses to overwrite)
 	uv run python scripts/generate_secrets.py
 
+.PHONY: dev-cert
+dev-cert: ## Self-signed localhost certificate in certbot layout (local dev only)
+	uv run python scripts/dev_cert.py --domain localhost
+	mkdir -p certbot-www
+
 .PHONY: up
-up: ## Build and start the full stack (https://localhost:8443)
+up: ## Build and start the stack with the dev mail sink (https://localhost:8443)
+	docker compose --profile dev up -d --build
+
+.PHONY: up-prod
+up-prod: ## Build and start the stack without dev-only services
 	docker compose up -d --build
 
 .PHONY: down

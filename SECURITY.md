@@ -53,7 +53,8 @@ reproduction steps; we aim to acknowledge within 2 business days.
   for the owner. Export `/v1/audit/head` to an external system periodically to detect truncation.
 
 ### Transport, input & output
-- TLS 1.2/1.3 only at the gateway with modern ciphers, HSTS, no session tickets.
+- TLS 1.2/1.3 only at the gateway with modern ciphers, HSTS, no session tickets; Let's Encrypt
+  certificates via certbot. Requests for unknown hostnames are rejected during the TLS handshake.
 - 64 KB body limit (gateway and app, including chunked bodies), header/body timeouts,
   per-IP connection and request rate limits, stricter limits on money endpoints.
 - `TrustedHostMiddleware`, strict security headers (`CSP default-src 'none'`, `nosniff`,
@@ -65,8 +66,8 @@ reproduction steps; we aim to acknowledge within 2 business days.
 
 ### Secrets & configuration
 - Secrets are never committed or baked into images: locally they live in the git-ignored `.env`
-  (mode 600) and are injected as environment variables by Compose. TLS keys are written to
-  tmpfs at container start, never to disk. Note that environment variables are visible to
+  (mode 600) and are injected as environment variables by Compose. Gateway TLS certificates
+  come from certbot (Let's Encrypt) and are mounted read-only. Note that environment variables are visible to
   anyone who can run `docker inspect`, so restrict Docker access and use a secret manager
   in production.
 - Services refuse to start in `production`/`staging` with unsafe settings (missing or short keys,
@@ -77,7 +78,10 @@ reproduction steps; we aim to acknowledge within 2 business days.
 ### Infrastructure
 - Containers: non-root UID 10001, read-only root filesystem, all capabilities dropped,
   `no-new-privileges`, resource limits, health checks. Minimal slim base image, patched at build.
-- Network: only the gateway publishes a port (bound to 127.0.0.1); services and data stores sit on
+- Package managers (`apt`, `dpkg`, `pip`) are removed from service images so a compromised
+  container cannot install tooling. A shell (`sh`/`bash`) is deliberately kept for production
+  maintenance via `docker exec`; the dpkg package database is kept so Trivy can still scan.
+- Network: only the gateway publishes ports (80 for ACME/redirect, 443); services and data stores sit on
   an `internal` network with no internet egress. `/internal`, `/metrics` and `/health` are not routed.
 - PostgreSQL: one database per service, SCRAM-SHA-256, separate **migrator** (DDL) and **app**
   (DML only) roles; migrations run in one-shot containers so app containers never hold DDL rights.

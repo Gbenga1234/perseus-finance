@@ -21,7 +21,10 @@ import httpx
 
 ROOT = Path(__file__).resolve().parent.parent
 BASE_URL = os.environ.get("PERSEUS_URL", "https://localhost:8443")
-CA = ROOT / "certs" / "perseus-dev-ca.crt"
+# Production certificates (certbot / Let's Encrypt) are verified normally. The local
+# gateway uses a self-signed dev certificate, so verification is skipped for localhost only.
+_LOCAL = httpx.URL(BASE_URL).host in ("localhost", "127.0.0.1")
+VERIFY_TLS = os.environ.get("PERSEUS_TLS_VERIFY", "false" if _LOCAL else "true") == "true"
 PASSWORD = "Smoke-Test-Passphrase-" + uuid.uuid4().hex[:8]
 
 
@@ -63,7 +66,7 @@ def create_admin(email: str) -> None:
 def main() -> None:
     run = uuid.uuid4().hex[:8]
     alice, bob, admin = (f"{n}-{run}@example.com" for n in ("alice", "bob", "admin"))
-    with httpx.Client(base_url=BASE_URL, verify=str(CA), timeout=10) as http:
+    with httpx.Client(base_url=BASE_URL, verify=VERIFY_TLS, timeout=10) as http:
 
         def login(email: str) -> dict[str, str]:
             r = http.post("/v1/auth/login", json={"email": email, "password": PASSWORD})

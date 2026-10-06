@@ -1,5 +1,6 @@
-# Local production-like stack.
-# All secrets come from the git-ignored .env file (create it with: make secrets).
+# Perseus stack (local and production). All configuration and secrets come from the
+# git-ignored .env file (create it with: make secrets). TLS certificates for the gateway
+# are managed by certbot; see README "Production TLS".
 # `${VAR:?...}` makes compose refuse to start if a value is missing.
 name: perseus
 
@@ -30,7 +31,7 @@ x-migrate: &migrate
     postgres: { condition: service_healthy }
 
 x-env: &env
-  ENVIRONMENT: production
+  ENVIRONMENT: ${ENVIRONMENT:-production}
   LOG_LEVEL: INFO
   DB_HOST: postgres
   DB_SSLMODE: prefer  # use verify-full with a TLS-enabled managed database in production
@@ -52,26 +53,26 @@ services:
   # ------------------------------------------------------------------ edge ----
   gateway:
     <<: *hardening
-    image: nginxinc/nginx-unprivileged:1.27-alpine
+    image: nginx:1.27-alpine
     restart: unless-stopped
-    ports: ["127.0.0.1:8443:8443"]
+    # Official image: the master runs as root only to bind ports and read certbot's
+    # root-only private keys; workers serving traffic run as the unprivileged "nginx" user.
+    cap_add: [CHOWN, SETUID, SETGID, NET_BIND_SERVICE]
+    ports:
+      - "${GATEWAY_BIND:-127.0.0.1}:${HTTP_PORT:-8080}:80"
+      - "${GATEWAY_BIND:-127.0.0.1}:${HTTPS_PORT:-8443}:443"
     networks:
       edge: {}
       backend: { ipv4_address: 172.30.0.10 }
-    tmpfs: [/tmp, /var/cache/nginx]
+    tmpfs: [/tmp, /var/cache/nginx, /var/run, /etc/nginx/conf.d]
     environment:
-      TLS_CERT: ${TLS_CERT:?missing in .env - run make secrets}
-      TLS_KEY: ${TLS_KEY:?missing in .env - run make secrets}
-    # Write the certificate and key from env into tmpfs (never onto disk), then start nginx.
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - >-
-        umask 077 && mkdir -p /tmp/tls
-        && printf '%b\n' "$$TLS_CERT" > /tmp/tls/cert.pem
-        && printf '%b\n' "$$TLS_KEY" > /tmp/tls/key.pem
-        && exec nginx -g 'daemon off;'
+      DOMAIN: ${DOMAIN:?missing in .env}
+      NGINX_ENVSUBST_FILTER: DOMAIN  # substitute only ${DOMAIN}; nginx's own $vars stay intact
     volumes:
       - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infra/nginx/templates:/etc/nginx/templates:ro
+      - ${LETSENCRYPT_DIR:-./letsencrypt}:/etc/letsencrypt:ro
+      - ${CERTBOT_WEBROOT:-./certbot-www}:/var/www/certbot:ro
     depends_on:
       auth: { condition: service_healthy }
       accounts: { condition: service_healthy }
@@ -84,7 +85,7 @@ services:
   auth-migrate:
     <<: *migrate
     image: perseus/auth:local
-    build: { context: ., args: { SERVICE: auth } }
+    build: { context: ., dockerfile: services/auth/Dockerfile }
     environment:
       <<: *env
       DB_NAME: auth
@@ -93,7 +94,7 @@ services:
   auth:
     <<: *service
     image: perseus/auth:local
-    build: { context: ., args: { SERVICE: auth } }
+    build: { context: ., dockerfile: services/auth/Dockerfile }
     environment:
       <<: *runtime-env
       DB_NAME: auth
@@ -110,7 +111,7 @@ services:
   accounts-migrate:
     <<: *migrate
     image: perseus/accounts:local
-    build: { context: ., args: { SERVICE: accounts } }
+    build: { context: ., dockerfile: services/accounts/Dockerfile }
     environment:
       <<: *env
       DB_NAME: accounts
@@ -119,7 +120,7 @@ services:
   accounts:
     <<: *service
     image: perseus/accounts:local
-    build: { context: ., args: { SERVICE: accounts } }
+    build: { context: ., dockerfile: services/accounts/Dockerfile }
     environment:
       <<: *runtime-env
       DB_NAME: accounts
@@ -137,7 +138,7 @@ services:
   ledger-migrate:
     <<: *migrate
     image: perseus/ledger:local
-    build: { context: ., args: { SERVICE: ledger } }
+    build: { context: ., dockerfile: services/ledger/Dockerfile }
     environment:
       <<: *env
       DB_NAME: ledger
@@ -146,7 +147,7 @@ services:
   ledger:
     <<: *service
     image: perseus/ledger:local
-    build: { context: ., args: { SERVICE: ledger } }
+    build: { context: ., dockerfile: services/ledger/Dockerfile }
     environment:
       <<: *runtime-env
       DB_NAME: ledger
@@ -165,7 +166,7 @@ services:
   fraud-migrate:
     <<: *migrate
     image: perseus/fraud:local
-    build: { context: ., args: { SERVICE: fraud } }
+    build: { context: ., dockerfile: services/fraud/Dockerfile }
     environment:
       <<: *env
       DB_NAME: fraud
@@ -174,7 +175,7 @@ services:
   fraud:
     <<: *service
     image: perseus/fraud:local
-    build: { context: ., args: { SERVICE: fraud } }
+    build: { context: ., dockerfile: services/fraud/Dockerfile }
     environment:
       <<: *runtime-env
       DB_NAME: fraud
@@ -189,7 +190,7 @@ services:
   notifications-migrate:
     <<: *migrate
     image: perseus/notifications:local
-    build: { context: ., args: { SERVICE: notifications } }
+    build: { context: ., dockerfile: services/notifications/Dockerfile }
     environment:
       <<: *env
       DB_NAME: notifications
@@ -198,17 +199,19 @@ services:
   notifications:
     <<: *service
     image: perseus/notifications:local
-    build: { context: ., args: { SERVICE: notifications } }
+    build: { context: ., dockerfile: services/notifications/Dockerfile }
     environment:
       <<: *runtime-env
       DB_NAME: notifications
       DB_USER: notifications_app
       DB_PASSWORD: ${NOTIFICATIONS_DB_APP_PASSWORD:?missing in .env - run make secrets}
       ALLOWED_HOSTS: '["notifications","localhost","127.0.0.1","api.perseus.local"]'
-      SMTP_HOST: mailpit
-      SMTP_PORT: "1025"
-      SMTP_STARTTLS: "true"
-      SMTP_CA_PEM: ${TLS_CA_CERT:?missing in .env - run make secrets}
+      SMTP_HOST: ${SMTP_HOST:?missing in .env}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-true}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      MAIL_FROM: ${MAIL_FROM:-Perseus Finance <no-reply@perseus.local>}
     depends_on:
       <<: *runtime-deps
       notifications-migrate: { condition: service_completed_successfully }
@@ -217,7 +220,7 @@ services:
   audit-migrate:
     <<: *migrate
     image: perseus/audit:local
-    build: { context: ., args: { SERVICE: audit } }
+    build: { context: ., dockerfile: services/audit/Dockerfile }
     environment:
       <<: *env
       DB_NAME: audit
@@ -226,7 +229,7 @@ services:
   audit:
     <<: *service
     image: perseus/audit:local
-    build: { context: ., args: { SERVICE: audit } }
+    build: { context: ., dockerfile: services/audit/Dockerfile }
     environment:
       <<: *runtime-env
       DB_NAME: audit
@@ -297,32 +300,22 @@ services:
       timeout: 3s
       retries: 20
 
-  mailpit:  # local SMTP sink with STARTTLS; UI at http://127.0.0.1:8025
+  mailpit:  # dev-only SMTP sink (`docker compose --profile dev up`); UI at http://127.0.0.1:8025
     image: axllent/mailpit:v1.21
+    profiles: [dev]
     restart: unless-stopped
     networks: [backend, edge]
     ports: ["127.0.0.1:8025:8025"]
-    tmpfs: [/tmp]
-    environment:
-      TLS_CERT: ${TLS_CERT:?missing in .env - run make secrets}
-      TLS_KEY: ${TLS_KEY:?missing in .env - run make secrets}
-      MP_SMTP_TLS_CERT: /tmp/tls/cert.pem
-      MP_SMTP_TLS_KEY: /tmp/tls/key.pem
-      MP_SMTP_REQUIRE_STARTTLS: "true"
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - >-
-        umask 077 && mkdir -p /tmp/tls
-        && printf '%b\n' "$$TLS_CERT" > /tmp/tls/cert.pem
-        && printf '%b\n' "$$TLS_KEY" > /tmp/tls/key.pem
-        && exec /mailpit
 
 networks:
   edge: {}
   backend:
     internal: true  # no route to the internet from services or data stores
     ipam:
-      config: [{ subnet: 172.30.0.0/24 }]
+      config:
+        # Dynamic addresses come from .128-.255 so the gateway's fixed .10
+        # (trusted for X-Forwarded-For) can never be handed to another container.
+        - { subnet: 172.30.0.0/24, ip_range: 172.30.0.128/25 }
 
 volumes:
   pgdata: {}

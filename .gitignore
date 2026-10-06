@@ -3,7 +3,8 @@
 .env.*
 !.env.example
 secrets/
-certs/
+letsencrypt/
+certbot-www/
 *.pem
 *.key
 

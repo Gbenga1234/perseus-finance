@@ -99,7 +99,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          build-args: SERVICE=${{ matrix.service }}
+          file: services/${{ matrix.service }}/Dockerfile
           tags: perseus/${{ matrix.service }}:${{ github.sha }}
           load: true
           cache-from: type=gha,scope=${{ matrix.service }}
