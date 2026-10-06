@@ -86,8 +86,9 @@ reproduction steps; we aim to acknowledge within 2 business days.
 - PostgreSQL: one database per service, SCRAM-SHA-256, separate **migrator** (DDL) and **app**
   (DML only) roles; migrations run in one-shot containers so app containers never hold DDL rights.
 - Redis: password-protected, dangerous commands (`FLUSHALL`, `CONFIG`, `DEBUG`…) disabled.
-- CI: ruff (incl. bandit rules), mypy, tests, bandit, pip-audit, gitleaks, Trivy image scans,
-  Dependabot for Python, Actions and Docker updates.
+- Local checks (`make check`): ruff (incl. bandit rules), mypy, tests, bandit, pip-audit;
+  gitleaks via pre-commit. Dependabot proposes Python, Actions and Docker updates.
+  There is no CI gate: deployment workflows push images without tests or image scans.
 
 ## Hardening checklist for a real deployment
 
@@ -100,5 +101,6 @@ reproduction steps; we aim to acknowledge within 2 business days.
 - [ ] Put a WAF / DDoS protection in front of the gateway; rate-limit by user as well as IP.
 - [ ] Add email verification and a breached-password check (k-anonymity HIBP API) at registration.
 - [ ] Anchor the audit head hash externally (e.g. WORM object storage) on a schedule.
+- [ ] Add a CI gate (tests, pip-audit, gitleaks, Trivy) that must pass before images are pushed.
 - [ ] Pin GitHub Actions to commit SHAs and sign images (cosign) with SBOMs.
 - [ ] Define data-retention and PII policies (audit and notification data contain personal data).

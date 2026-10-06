@@ -33,7 +33,7 @@ security: ## Bandit SAST + dependency vulnerability audit
 	uv run pip-audit --skip-editable --strict
 
 .PHONY: check
-check: lint typecheck test security ## Everything CI runs (except image scans)
+check: lint typecheck test security ## Run all quality and security checks (run before pushing)
 
 .PHONY: secrets
 secrets: ## Generate .env with all secrets (git-ignored; refuses to overwrite)

@@ -148,9 +148,9 @@ library and `uv.lock` live there); only that service's code enters the build con
 docker build -f services/ledger/Dockerfile -t perseus/ledger .
 ```
 
-Tests run in-process against SQLite with real JWT signing/verification; CI additionally runs
-every migration (upgrade → drift check → downgrade → upgrade) against PostgreSQL 16, scans for
-secrets (gitleaks) and vulnerable dependencies (pip-audit), and scans each image with Trivy.
+Tests run in-process against SQLite with real JWT signing/verification. There is no CI test
+pipeline: run `make check` (lint, types, tests, bandit, pip-audit) before pushing to `main`,
+because the deployment workflows build and push images without running tests.
 
 See [SECURITY.md](SECURITY.md) for the security model and [docs/architecture.md](docs/architecture.md)
 for design decisions.
