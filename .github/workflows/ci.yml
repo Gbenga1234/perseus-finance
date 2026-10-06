@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Lint, type-check, test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.7.20"
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --all-packages --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy libs/perseus-common/src services/*/src
+      - run: uv run pytest
+
+  security:
+    name: Security scanning
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.7.20"
+          python-version: "3.12"
+      - run: uv sync --all-packages --frozen
+      - name: Static analysis (bandit)
+        run: uv run bandit -r libs services -c pyproject.toml -ll
+      - name: Dependency vulnerabilities (pip-audit)
+        run: uv run pip-audit --skip-editable --strict
+      - name: Secret scanning (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  migrations:
+    name: Migrations against PostgreSQL
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: ci-only-password
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-retries 10
+    strategy:
+      matrix:
+        service: [auth, accounts, ledger, fraud, notifications, audit]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.7.20"
+          python-version: "3.12"
+      - run: uv sync --all-packages --frozen
+      - name: Upgrade, check for drift, downgrade, upgrade again
+        working-directory: services/${{ matrix.service }}
+        env:
+          ENVIRONMENT: test
+          DB_HOST: localhost
+          DB_USER: postgres
+          DB_PASSWORD: ci-only-password
+          DB_NAME: postgres
+          DB_SSLMODE: disable
+        run: |
+          uv run alembic upgrade head
+          uv run alembic check
+          uv run alembic downgrade base
+          uv run alembic upgrade head
+
+  images:
+    name: Build & scan image (${{ matrix.service }})
+    needs: [quality]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [auth, accounts, ledger, fraud, notifications, audit]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          build-args: SERVICE=${{ matrix.service }}
+          tags: perseus/${{ matrix.service }}:${{ github.sha }}
+          load: true
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+      - name: Vulnerability scan (Trivy)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: perseus/${{ matrix.service }}:${{ github.sha }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
