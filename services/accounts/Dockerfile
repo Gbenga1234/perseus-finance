@@ -1,5 +1,6 @@
 # syntax=docker/dockerfile:1.7
-# One Dockerfile for every service:  docker build --build-arg SERVICE=ledger .
+# Perseus accounts service. Build from the repository root:
+#   docker build -f services/accounts/Dockerfile -t perseus/accounts .
 ARG PYTHON_IMAGE=python:3.12-slim-bookworm
 
 # ---------------------------------------------------------------------------------
@@ -10,18 +11,19 @@ ENV UV_COMPILE_BYTECODE=1 \
     UV_PYTHON_DOWNLOADS=never \
     UV_PROJECT_ENVIRONMENT=/opt/venv
 WORKDIR /src
-ARG SERVICE
-RUN test -n "${SERVICE}" || (echo "SERVICE build-arg is required" && exit 1)
+# Only the workspace root, the shared library and this service enter the build, so
+# changes to other services never invalidate this image's cache.
 COPY pyproject.toml uv.lock ./
 COPY libs ./libs
-COPY services ./services
+COPY services/accounts ./services/accounts
 # --frozen: fail if uv.lock is out of date; --no-editable: the venv is self-contained.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-editable --package "${SERVICE}-service"
+    uv sync --frozen --no-dev --no-editable --package accounts-service
 
 # ---------------------------------------------------------------------------------
 FROM ${PYTHON_IMAGE} AS runtime
-ARG SERVICE
+LABEL org.opencontainers.image.title="perseus-accounts" \
+      org.opencontainers.image.description="Customer account lifecycle"
 RUN apt-get update \
     && apt-get upgrade -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
@@ -37,11 +39,11 @@ RUN apt-get update \
 ENV PATH=/opt/venv/bin:$PATH \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    APP_FACTORY=${SERVICE}_service.main:build_app
+    APP_FACTORY=accounts_service.main:build_app
 WORKDIR /app
 COPY --from=builder /opt/venv /opt/venv
-COPY services/${SERVICE}/alembic.ini ./alembic.ini
-COPY services/${SERVICE}/migrations ./migrations
+COPY services/accounts/alembic.ini ./alembic.ini
+COPY services/accounts/migrations ./migrations
 # Code is owned by root and not writable by the runtime user.
 USER 10001:10001
 EXPOSE 8000

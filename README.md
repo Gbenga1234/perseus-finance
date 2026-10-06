@@ -124,12 +124,11 @@ only when `ENVIRONMENT` is `development` or `test`.
 ```
 libs/perseus-common/      shared: config, JWT verification, middleware, errors, db, events,
                           outbox, money, service client, app factory, test helpers
-services/<name>/          src/<name>_service/  tests/  migrations/  alembic.ini
+services/<name>/          src/<name>_service/  tests/  migrations/  alembic.ini  Dockerfile
 infra/nginx/              gateway config (+ templates/ rendered with $DOMAIN)
 infra/postgres/init/      per-service databases and least-privilege roles
 scripts/                  .env secret generation, smoke test
 .env.example              every configuration/secret variable (real values go in .env)
-Dockerfile                one hardened multi-stage image definition for every service
 docker-compose.yml        production-like local stack
 ```
 
@@ -140,6 +139,13 @@ uv run pytest services/ledger/tests          # one service
 uv run pytest -k idempotent                   # by keyword
 cd services/ledger && ENVIRONMENT=development DATABASE_URL_OVERRIDE=sqlite+aiosqlite:///dev.db \
   uv run alembic revision --autogenerate -m "describe change"
+```
+
+Each service has its own Dockerfile. Build an image from the repository root (the shared
+library and `uv.lock` live there); only that service's code enters the build context:
+
+```bash
+docker build -f services/ledger/Dockerfile -t perseus/ledger .
 ```
 
 Tests run in-process against SQLite with real JWT signing/verification; CI additionally runs

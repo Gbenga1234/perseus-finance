@@ -85,7 +85,7 @@ services:
   auth-migrate:
     <<: *migrate
     image: perseus/auth:local
-    build: { context: ., args: { SERVICE: auth } }
+    build: { context: ., dockerfile: services/auth/Dockerfile }
     environment:
       <<: *env
       DB_NAME: auth
@@ -94,7 +94,7 @@ services:
   auth:
     <<: *service
     image: perseus/auth:local
-    build: { context: ., args: { SERVICE: auth } }
+    build: { context: ., dockerfile: services/auth/Dockerfile }
     environment:
       <<: *runtime-env
       DB_NAME: auth
@@ -111,7 +111,7 @@ services:
   accounts-migrate:
     <<: *migrate
     image: perseus/accounts:local
-    build: { context: ., args: { SERVICE: accounts } }
+    build: { context: ., dockerfile: services/accounts/Dockerfile }
     environment:
       <<: *env
       DB_NAME: accounts
@@ -120,7 +120,7 @@ services:
   accounts:
     <<: *service
     image: perseus/accounts:local
-    build: { context: ., args: { SERVICE: accounts } }
+    build: { context: ., dockerfile: services/accounts/Dockerfile }
     environment:
       <<: *runtime-env
       DB_NAME: accounts
@@ -138,7 +138,7 @@ services:
   ledger-migrate:
     <<: *migrate
     image: perseus/ledger:local
-    build: { context: ., args: { SERVICE: ledger } }
+    build: { context: ., dockerfile: services/ledger/Dockerfile }
     environment:
       <<: *env
       DB_NAME: ledger
@@ -147,7 +147,7 @@ services:
   ledger:
     <<: *service
     image: perseus/ledger:local
-    build: { context: ., args: { SERVICE: ledger } }
+    build: { context: ., dockerfile: services/ledger/Dockerfile }
     environment:
       <<: *runtime-env
       DB_NAME: ledger
@@ -166,7 +166,7 @@ services:
   fraud-migrate:
     <<: *migrate
     image: perseus/fraud:local
-    build: { context: ., args: { SERVICE: fraud } }
+    build: { context: ., dockerfile: services/fraud/Dockerfile }
     environment:
       <<: *env
       DB_NAME: fraud
@@ -175,7 +175,7 @@ services:
   fraud:
     <<: *service
     image: perseus/fraud:local
-    build: { context: ., args: { SERVICE: fraud } }
+    build: { context: ., dockerfile: services/fraud/Dockerfile }
     environment:
       <<: *runtime-env
       DB_NAME: fraud
@@ -190,7 +190,7 @@ services:
   notifications-migrate:
     <<: *migrate
     image: perseus/notifications:local
-    build: { context: ., args: { SERVICE: notifications } }
+    build: { context: ., dockerfile: services/notifications/Dockerfile }
     environment:
       <<: *env
       DB_NAME: notifications
@@ -199,7 +199,7 @@ services:
   notifications:
     <<: *service
     image: perseus/notifications:local
-    build: { context: ., args: { SERVICE: notifications } }
+    build: { context: ., dockerfile: services/notifications/Dockerfile }
     environment:
       <<: *runtime-env
       DB_NAME: notifications
@@ -220,7 +220,7 @@ services:
   audit-migrate:
     <<: *migrate
     image: perseus/audit:local
-    build: { context: ., args: { SERVICE: audit } }
+    build: { context: ., dockerfile: services/audit/Dockerfile }
     environment:
       <<: *env
       DB_NAME: audit
@@ -229,7 +229,7 @@ services:
   audit:
     <<: *service
     image: perseus/audit:local
-    build: { context: ., args: { SERVICE: audit } }
+    build: { context: ., dockerfile: services/audit/Dockerfile }
     environment:
       <<: *runtime-env
       DB_NAME: audit
