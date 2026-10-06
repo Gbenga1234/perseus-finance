@@ -20,7 +20,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  IMAGE_NAME: capitalsage/perseus-audit
+  IMAGE_NAME: gowobo/perseus-audit
 
 jobs:
   docker-build-push:

@@ -20,7 +20,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  IMAGE_NAME: capitalsage/perseus-notifications
+  IMAGE_NAME: gowobo/perseus-notifications
 
 jobs:
   docker-build-push:
