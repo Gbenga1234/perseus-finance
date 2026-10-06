@@ -77,6 +77,9 @@ reproduction steps; we aim to acknowledge within 2 business days.
 ### Infrastructure
 - Containers: non-root UID 10001, read-only root filesystem, all capabilities dropped,
   `no-new-privileges`, resource limits, health checks. Minimal slim base image, patched at build.
+- Package managers (`apt`, `dpkg`, `pip`) are removed from service images so a compromised
+  container cannot install tooling. A shell (`sh`/`bash`) is deliberately kept for production
+  maintenance via `docker exec`; the dpkg package database is kept so Trivy can still scan.
 - Network: only the gateway publishes a port (bound to 127.0.0.1); services and data stores sit on
   an `internal` network with no internet egress. `/internal`, `/metrics` and `/health` are not routed.
 - PostgreSQL: one database per service, SCRAM-SHA-256, separate **migrator** (DDL) and **app**

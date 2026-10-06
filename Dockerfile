@@ -26,7 +26,14 @@ RUN apt-get update \
     && apt-get upgrade -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system --gid 10001 app \
-    && useradd --system --uid 10001 --gid app --home-dir /nonexistent --shell /usr/sbin/nologin app
+    && useradd --system --uid 10001 --gid app --home-dir /nonexistent --shell /usr/sbin/nologin app \
+    # Remove the package managers so a compromised container cannot install tooling.
+    # The shell is kept on purpose (production maintenance via `docker exec ... sh`).
+    # /var/lib/dpkg/status stays so image scanners (Trivy) can still inventory OS packages.
+    && python -m pip uninstall --yes --root-user-action=ignore pip \
+    && rm -rf /usr/bin/apt /usr/bin/apt-* /usr/bin/dpkg /usr/bin/dpkg-* \
+              /usr/lib/apt /usr/lib/dpkg /etc/apt /var/cache/apt /var/lib/apt \
+              /usr/local/bin/pip*
 ENV PATH=/opt/venv/bin:$PATH \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
