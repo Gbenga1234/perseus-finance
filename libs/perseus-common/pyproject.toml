@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Shared security, observability, persistence and messaging primitives for Perseus services."
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi>=0.115",
+    "fastapi>=0.143.0",
     "uvicorn[standard]>=0.30",
     "pydantic>=2.8",
     "pydantic-settings>=2.4",
